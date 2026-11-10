@@ -1,6 +1,6 @@
 # Parcel Feedback: mapping land parcels in Bangladesh with SAM and human feedback
 
-**Fariha Aktar** · Urban and Regional Planning, BUET · [Research portfolio](https://aktarfariha.github.io/) · Ongoing, started August 2026
+**Fariha Aktar** · Urban and Regional Planning, BUET 
 
 > **Work in progress.** The pipeline and review tool are built and tested; labelling and evaluation
 > on study areas in Bangladesh are under way, and results will be added here when they are ready.
