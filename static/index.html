@@ -1,0 +1,759 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Parcel Review</title>
+<link rel="stylesheet" href="/static/vendor/leaflet/leaflet.css">
+<style>
+  :root { --bg:#14181d; --panel:#1d232b; --line:#2c3541; --text:#e6ebf1; --muted:#93a0af; --accent:#4cc38a; --warn:#f0b429; }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.4 system-ui,sans-serif; background:var(--bg); color:var(--text); height:100vh; display:flex; flex-direction:column; }
+  header { display:flex; gap:12px; align-items:center; padding:10px 16px; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+  header h1 { font-size:16px; margin:0 8px 0 0; }
+  select, input, button { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; }
+  button { cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button.primary { background:var(--accent); color:#06281a; border-color:var(--accent); font-weight:600; }
+  button.active { background:var(--warn); color:#2b2000; border-color:var(--warn); }
+  main { flex:1; display:flex; min-height:0; }
+  #stage { flex:1; overflow:auto; position:relative; background:#0c0f12; }
+  #wrap { position:relative; display:inline-block; }
+  #wrap img { display:block; max-width:none; }
+  #wrap svg { position:absolute; inset:0; width:100%; height:100%; }
+  .parcel { fill:rgba(255,255,255,0.01); stroke:#ff4d4d; stroke-width:1.5; vector-effect:non-scaling-stroke; cursor:pointer; }
+  .parcel:hover { fill:rgba(255,255,255,0.25); }
+  .parcel.selected { stroke:#fff; stroke-width:3; fill:rgba(255,255,255,0.3); }
+  .parcel.low { stroke:#ff4d4d; }
+  .parcel.mid { stroke:#f0b429; }
+  .parcel.high { stroke:#4cc38a; }
+  .missed { fill:rgba(76,195,138,0.2); stroke:#4cc38a; stroke-dasharray:5 3; stroke-width:2; vector-effect:non-scaling-stroke; }
+  .draft { fill:rgba(240,180,41,0.25); stroke:#f0b429; stroke-width:2; vector-effect:non-scaling-stroke; }
+  aside { width:320px; border-left:1px solid var(--line); background:var(--panel); padding:14px; overflow:auto; }
+  aside h2 { font-size:14px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  .labels { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:14px; }
+  .labels button { text-align:left; }
+  .labels button.mine { border-color:var(--accent); background:#173326; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
+  .muted { color:var(--muted); font-size:13px; }
+  .bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:4px 0 12px; }
+  .bar > div { height:100%; background:var(--accent); }
+  #toast { position:fixed; bottom:16px; left:50%; transform:translateX(-50%); background:var(--accent); color:#06281a; padding:8px 16px; border-radius:8px; font-weight:600; opacity:0; transition:opacity .2s; pointer-events:none; }
+  #toast.show { opacity:1; }
+  .legend span { display:inline-block; width:10px; height:10px; border-radius:2px; margin-right:4px; }
+  [hidden] { display:none !important; }
+  .tab { background:transparent; border:1px solid transparent; color:var(--muted); }
+  .tab.active { color:var(--text); border-color:var(--line); background:var(--panel); }
+  .hdrgroup { display:flex; gap:12px; align-items:center; flex-wrap:wrap; flex:1; }
+  a.btn { font:inherit; color:var(--text); background:var(--panel); border:1px solid var(--line); border-radius:6px; padding:6px 10px; text-decoration:none; }
+  a.btn:hover { border-color:var(--accent); }
+  #mapWrap { flex:1; position:relative; min-width:0; }
+  #map { position:absolute; inset:0; background:#0c0f12; user-select:none; -webkit-user-select:none; }
+  #addPanel label { display:block; margin-bottom:10px; font-size:13px; color:var(--muted); }
+  #addPanel input, #addPanel select { width:100%; margin-top:4px; }
+  #addPanel .inline { display:flex; gap:6px; margin-bottom:10px; }
+  #addPanel .inline input { margin:0; flex:1; min-width:0; }
+  .dot { width:10px; height:10px; border-radius:50%; background:#6b7684; display:inline-block; flex:none; }
+  .dot.ok { background:var(--accent); } .dot.bad { background:#ff4d4d; }
+  .spin { width:14px; height:14px; border:2px solid var(--line); border-top-color:var(--accent); border-radius:50%; display:inline-block; vertical-align:-2px; margin-right:6px; animation:sp .8s linear infinite; }
+  @keyframes sp { to { transform:rotate(360deg); } }
+  #jobBox { margin-top:12px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#171c22; font-size:13px; }
+  #jobBox.err { border-color:#ff4d4d; color:#ffb3b3; }
+  button:disabled { opacity:.45; cursor:not-allowed; }
+  button:disabled:hover { border-color:var(--line); }
+  .parcel.selected { stroke:#fff !important; }
+  .parcel.dim { opacity:.35; }
+  .parcel.edited { stroke-dasharray:7 3; }
+  .redrawing { fill:rgba(240,180,41,0.18); stroke:#f0b429; stroke-width:3; stroke-dasharray:3 3; vector-effect:non-scaling-stroke; pointer-events:none; }
+  /* ---- the system's guess (review panel) */
+  #guess { margin-bottom:14px; padding:10px; border:1px solid var(--line); border-radius:8px; background:#171c22; }
+  #guess .top { font-size:15px; }
+  #guess .top b { color:var(--text); }
+  .pbar { display:grid; grid-template-columns:86px 1fr 38px; gap:6px; align-items:center; font-size:12px; color:var(--muted); margin-top:5px; }
+  .pbar i { display:block; height:6px; border-radius:3px; background:var(--s1); }
+  .pbar span { height:6px; border-radius:3px; background:var(--line); display:block; }
+  .pbar em { font-style:normal; text-align:right; }
+  #guess .warn { color:var(--warn); margin-top:8px; font-size:13px; }
+  #guess .yn { display:flex; gap:8px; margin-top:10px; }
+  #guess .yn button { flex:1; font-weight:600; padding:9px 10px; }
+  #guess .yn button.no { border-color:#7a3b3b; }
+  #guess .yn button.no:hover { border-color:#ff6b6b; }
+  #guess .yn button.skip { flex:.6; font-weight:400; color:var(--muted); }
+  .labels button:disabled { text-decoration:line-through; }
+  .labels button .k { color:var(--muted); font-size:11px; margin-right:6px; }
+  .switch { display:flex; gap:6px; align-items:center; font-size:12px; color:var(--muted); margin:0 0 12px; cursor:pointer; }
+  .switch input { padding:0; }
+  /* ---- learning page */
+  :root { --s1:#3987e5; --s2:#93a0af; }
+  #learnMain { flex:1; overflow:auto; }
+  #learnBody { max-width:960px; margin:0 auto; padding:20px 18px 60px; }
+  #learnBody h2 { font-size:15px; margin:30px 0 4px; color:var(--text); text-transform:none; letter-spacing:0; }
+  #learnBody h2:first-child { margin-top:0; }
+  #learnBody p { margin:4px 0 10px; color:var(--muted); max-width:70ch; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(240px,1fr)); gap:12px; margin:14px 0; }
+  .tile { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .tile .k { color:var(--muted); font-size:13px; }
+  .tile .v { font-size:30px; font-weight:600; margin:4px 0; }
+  .tile .c { color:var(--muted); font-size:12.5px; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+  .statusline { display:flex; gap:12px; align-items:center; flex-wrap:wrap; }
+  table.t { border-collapse:collapse; width:100%; font-size:13px; }
+  table.t th { text-align:left; color:var(--muted); font-weight:500; padding:6px 10px 6px 0; border-bottom:1px solid var(--line); }
+  table.t td { padding:6px 10px 6px 0; border-bottom:1px solid #232b35; }
+  table.t td.n, table.t th.n { text-align:right; }
+  .hb { display:inline-block; height:8px; border-radius:4px; background:var(--s1); vertical-align:middle; margin-right:8px; min-width:2px; }
+  .legendrow { display:flex; gap:18px; font-size:13px; color:var(--muted); margin:8px 0 4px; flex-wrap:wrap; }
+  .legendrow i { display:inline-block; width:18px; height:0; border-top:2px solid var(--s1); vertical-align:middle; margin-right:6px; }
+  .legendrow i.b { border-top-color:var(--s2); }
+  #chartBox { position:relative; }
+  #chartBox svg { width:100%; height:auto; display:block; }
+  #tip { position:absolute; pointer-events:none; background:#0c0f12; border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:12px; white-space:nowrap; opacity:0; transition:opacity .1s; z-index:5; }
+  details { margin-top:8px; } summary { cursor:pointer; color:var(--muted); font-size:13px; }
+  .err { color:#ff9b9b; }
+  @media (max-width: 800px) { main { flex-direction:column; } aside { width:auto; border-left:0; border-top:1px solid var(--line); max-height:45vh; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Parcel Review</h1>
+  <button id="tabReview" class="tab active">Review parcels</button>
+  <button id="tabAdd" class="tab">Add new area</button>
+  <button id="tabLearn" class="tab">Learning</button>
+  <div id="reviewControls" class="hdrgroup">
+    <select id="imageSel" title="Image"></select>
+    <input id="userId" placeholder="Your name or ID" size="14">
+    <button id="nextBtn" class="primary">Ask me about the next parcel</button>
+    <button id="drawBtn">Draw a missed parcel</button>
+    <label class="muted" style="display:flex;gap:5px;align-items:center;cursor:pointer" title="Zoom in on the parcel you click, so you can see it clearly">
+      <input type="checkbox" id="autoZoom" checked style="padding:0"> Zoom in on click</label>
+    <button id="fitBtn" title="Zoom back out to the whole picture">Show whole image</button>
+    <a id="exportLink" class="btn" hidden title="Parcels and labels as a map file (lon/lat)">Export GeoJSON</a>
+    <label class="muted" style="display:flex;gap:6px;align-items:center">Colour by
+      <select id="colorBy">
+        <option value="agree">people's agreement</option>
+        <option value="guess">system's guess</option>
+        <option value="sure">system's confidence</option>
+      </select></label>
+    <span id="legend" class="muted legend"></span>
+    <span id="stats" class="muted" style="margin-left:auto"></span>
+  </div>
+</header>
+<main id="reviewMain">
+  <div id="stage"><div id="wrap"><img id="img" alt=""><svg id="svg"></svg></div></div>
+  <aside id="panel">
+    <label class="switch" title="Hides the system's guess and other people's answers until you have answered, so they cannot influence you."><input type="checkbox" id="blind"> Blind mode: hide guesses until I answer</label>
+    <h2>Selected parcel</h2>
+    <div id="empty" class="muted">Click a parcel on the image, or press “Ask me about the next parcel”. The system picks the parcel it is least sure about.</div>
+    <div id="detail" hidden>
+      <div id="pid" style="font-weight:600"></div>
+      <div id="consBox">
+        <div id="cons" class="muted"></div>
+        <div class="bar"><div id="conf"></div></div>
+      </div>
+      <h2>The system's guess</h2>
+      <div id="guess"></div>
+      <h2 id="labelsH">What is this parcel?</h2>
+      <div class="labels" id="labels"></div>
+      <h2>Is the boundary right?</h2>
+      <div class="row" id="issues" style="margin-bottom:8px"></div>
+      <div class="row" id="editRow" style="margin-bottom:6px"></div>
+      <div id="editHint" class="muted" style="font-size:12px"></div>
+    </div>
+    <div id="drawHelp" hidden class="muted">
+      <h2 id="drawTitle">Drawing mode</h2>
+      <div id="drawText">Click points around the missed parcel. Then:</div>
+      <div class="row" style="margin-top:8px">
+        <button id="finishDraw" class="primary">Finish</button>
+        <button id="undoDraw">Undo point</button>
+        <button id="cancelDraw">Cancel</button>
+      </div>
+      <div style="font-size:11.5px;margin:-6px 0 14px">Keys: Enter = finish · Backspace = undo · Esc = cancel</div>
+      <div id="drawLabelBox">
+        <h2>Label for it</h2>
+        <div class="labels" id="drawLabels"></div>
+      </div>
+    </div>
+  </aside>
+</main>
+<main id="addMain" hidden>
+  <div id="mapWrap"><div id="map"></div></div>
+  <aside id="addPanel">
+    <h2>1. Connect the detector</h2>
+    <div class="muted" style="margin-bottom:8px">Run the Colab notebook, then paste the <b>connection link</b> it prints.</div>
+    <div class="inline"><input id="linkIn" placeholder="https://...trycloudflare.com?token=..."><button id="linkSave">Connect</button></div>
+    <div class="row" style="align-items:center"><span id="detDot" class="dot"></span><span id="detMsg" class="muted">Checking...</span></div>
+
+    <h2>2. Choose the area</h2>
+    <div class="inline"><input id="placeIn" placeholder="Search a place, or type lat, lon"><button id="placeGo">Go</button></div>
+    <div class="row"><button id="rectBtn">Draw a box</button><button id="viewBtn">Use what I see</button></div>
+    <div id="planBox" class="muted" style="margin-bottom:14px">Zoom the map to your land, then draw a box around it. Smaller boxes give sharper parcels.</div>
+
+    <h2>3. Detect parcels</h2>
+    <label>Area name (optional)<input id="areaName" placeholder="e.g. Umapada"></label>
+    <label>Quality
+      <select id="quality"><option value="fast">Fast (a few minutes)</option><option value="accurate">Accurate (slower, 10+ minutes)</option></select></label>
+    <button id="detectBtn" class="primary" disabled>Detect parcels</button>
+    <div id="jobBox" hidden></div>
+    <div class="muted" id="attrib" style="margin-top:16px;font-size:11px"></div>
+  </aside>
+</main>
+<main id="learnMain" hidden><div id="learnBody"></div></main>
+<div id="toast"></div>
+<script src="/static/vendor/leaflet/leaflet.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+let cfg, image, gj, selected = null, drawing = false, draft = [], drawLabel = null;
+
+const uid = () => $("userId").value.trim();
+function toast(msg){ const t=$("toast"); t.textContent=msg; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1400); }
+async function api(path, opts){
+  const r = await fetch(path, opts);
+  if(!r.ok){ throw new Error((await r.json().catch(()=>({detail:r.statusText}))).detail); }
+  return r.json();
+}
+const post = (path, body) => api(path, {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+const pretty = s => s.replaceAll("_"," ");
+
+async function init(){
+  cfg = await api("/api/config");
+  const imgs = await refreshImages();
+  $("userId").value = localStorage.getItem("uid") || "";
+  $("userId").addEventListener("change", ()=>localStorage.setItem("uid", uid()));
+  $("imageSel").addEventListener("change", ()=>loadImage($("imageSel").value));
+  $("nextBtn").onclick = askNext;
+  $("colorBy").onchange = ()=>{ colorMode = $("colorBy").value; render(); };
+  $("autoZoom").checked = localStorage.getItem("autoZoom") !== "0";
+  $("autoZoom").onchange = ()=>{ localStorage.setItem("autoZoom", $("autoZoom").checked ? "1" : "0"); if(!$("autoZoom").checked) fitWhole(); };
+  $("fitBtn").onclick = fitWhole;
+  document.addEventListener("keydown", onKey);
+  $("blind").checked = localStorage.getItem("blind") === "1";
+  $("blind").onchange = ()=>{ localStorage.setItem("blind", $("blind").checked ? "1" : "0"); showDetail(); };
+  setInterval(checkModel, 8000);
+  $("drawBtn").onclick = ()=> setDrawing(!drawing);
+  $("finishDraw").onclick = finishDraw;
+  $("undoDraw").onclick = ()=>{ draft.pop(); renderDraft(); };
+  $("cancelDraw").onclick = ()=> setDrawing(false);
+  $("drawLabels").innerHTML = cfg.labels.map(l=>`<button data-l="${l}">${pretty(l)}</button>`).join("");
+  $("drawLabels").onclick = e => { const b=e.target.closest("button"); if(!b) return; drawLabel=b.dataset.l;
+    [...$("drawLabels").children].forEach(c=>c.classList.toggle("mine", c===b)); };
+  if(imgs.length) loadImage(imgs[0]); else $("empty").textContent="No images yet. Open the 'Add new area' tab to create one, or put <name>.jpg and <name>_parcels.geojson in the data/ folder.";
+  initAdd();
+}
+
+async function loadImage(name){
+  image = name; selected = null; denyPid = null; skipped.clear(); setDrawing(false); showDetail();
+  gj = await fetchParcels(name);
+  $("exportLink").hidden = !gj.georef; $("exportLink").href = `/api/images/${name}/export.geojson`; $("exportLink").download = name + ".geojson";
+  $("img").onload = () => { baseW = Math.min(1400, Math.max(gj.width, ($("stage").clientWidth||1000) - 24)); zoomF = 1; $("wrap").style.width = baseW+"px"; render(); };
+  $("img").src = `/api/images/${name}/file`;
+  $("img").style.width = "100%";
+  refreshStats();
+}
+
+function confClass(p){ if(!p.n_votes) return "low"; return p.confidence>=0.8 && p.n_votes>=2 ? "high" : "mid"; }
+const fetchParcels = name => api(`/api/images/${name}/parcels?user_id=${encodeURIComponent(uid())}`);
+
+// ---- colouring: by people's agreement (default), by the system's guess, or by the system's confidence
+let colorMode = "agree";
+const LABEL_COLORS = ["#3987e5","#d95926","#199e70","#c98500","#d55181","#008300","#9085e9"]; // validated categorical order
+const labelColor = l => LABEL_COLORS[Math.max(0, cfg.labels.indexOf(l)) % LABEL_COLORS.length];
+const sureColor = c => c >= 0.7 ? "#4cc38a" : c >= 0.4 ? "#f0b429" : "#ff4d4d";
+function strokeFor(p){
+  if(colorMode === "guess") return p.predicted_label ? labelColor(p.predicted_label) : "#6b7684";
+  if(colorMode === "sure") return p.predicted_label ? sureColor(p.predicted_confidence) : "#6b7684";
+  return null; // agreement colours come from the CSS classes
+}
+function renderLegend(){
+  const dot = (c, t) => `<span style="background:${c};margin-left:8px"></span>${t}`;
+  if(colorMode === "guess") $("legend").innerHTML = cfg.labels.map(l => dot(labelColor(l), pretty(l))).join(" ") + dot("#6b7684", "no guess yet");
+  else if(colorMode === "sure") $("legend").innerHTML = dot("#ff4d4d", "unsure") + dot("#f0b429", "fairly sure") + dot("#4cc38a", "sure");
+  else $("legend").innerHTML = dot("#ff4d4d", "no/low agreement") + dot("#f0b429", "some") + dot("#4cc38a", "agreed");
+}
+
+function render(){
+  const svg = $("svg");
+  svg.setAttribute("viewBox", `0 0 ${gj.width} ${gj.height}`);
+  svg.setAttribute("preserveAspectRatio", "none");
+  svg.innerHTML = "";
+  renderLegend();
+  for(const f of gj.features){
+    const ring = f.geometry.coordinates[0];
+    const el = document.createElementNS(NS, "polygon");
+    el.setAttribute("points", ring.map(p=>p.join(",")).join(" "));
+    el.setAttribute("class", `parcel ${confClass(f.properties)}` + (selected===f.properties.parcel_id?" selected":"")
+      + (f.properties.edited?" edited":"") + (f.properties.boundary_issues.not_a_parcel?" dim":""));
+    const sc = strokeFor(f.properties); if(sc){ el.style.stroke = sc; el.style.strokeWidth = "2"; }
+    el.dataset.pid = f.properties.parcel_id;
+    el.addEventListener("click", ev => { if(drawing) return; ev.stopPropagation(); select(f.properties.parcel_id, $("autoZoom").checked); });
+    svg.appendChild(el);
+  }
+  for(const m of gj.missed_parcels||[]){
+    const el = document.createElementNS(NS, "polygon");
+    el.setAttribute("points", m.polygon.map(p=>p.join(",")).join(" "));
+    el.setAttribute("class", "missed");
+    svg.appendChild(el);
+  }
+  if(drawing && drawKind === "redraw"){   // show the outline that is being replaced
+    const f = gj.features.find(x=>x.properties.parcel_id===redrawPid);
+    if(f){ const el = document.createElementNS(NS, "polygon");
+      el.setAttribute("points", f.geometry.coordinates[0].map(p=>p.join(",")).join(" ")); el.setAttribute("class", "redrawing"); svg.appendChild(el); }
+  }
+  renderDraft();
+}
+
+// ---- zoom: clicking a parcel brings it closer so it can be judged clearly
+let baseW = 1000, zoomF = 1, denyPid = null, busy = false;
+const skipped = new Set();
+function setZoom(f){ zoomF = f; $("wrap").style.width = Math.round(baseW * f) + "px"; }
+function fitWhole(){ setZoom(1); $("stage").scrollTo({left:0, top:0}); }
+function focusParcel(pid){
+  const el = document.querySelector(`.parcel[data-pid="${pid}"]`); if(!el || !gj) return;
+  const b = el.getBBox(), st = $("stage");
+  let f = zoomF;
+  if($("autoZoom").checked){
+    // make the parcel fill about half of the visible area, but never zoom in more than 3x or less than 1.4x
+    const size = Math.max(b.width, b.height) * baseW / gj.width;
+    f = Math.min(3, Math.max(1.4, 0.5 * Math.min(st.clientWidth, st.clientHeight) / Math.max(size, 1)));
+    setZoom(f);
+  }
+  const sc = baseW * f / gj.width;
+  st.scrollTo({left: Math.max(0, (b.x + b.width/2) * sc - st.clientWidth/2), top: Math.max(0, (b.y + b.height/2) * sc - st.clientHeight/2)});
+}
+function select(pid, focus){
+  if(denyPid !== pid) denyPid = null;
+  selected = pid; showDetail();
+  document.querySelectorAll(".parcel").forEach(e=>e.classList.toggle("selected", e.dataset.pid===pid));
+  if(focus) focusParcel(pid);
+}
+
+const hiddenNow = p => $("blind").checked && !p.my_label;   // blind mode: guess and others' answers stay hidden until I answer
+const currentParcel = () => gj && gj.features.map(x=>x.properties).find(p=>p.parcel_id===selected);
+
+function renderGuess(p){
+  const box = $("guess");
+  if(hiddenNow(p)){ box.innerHTML = `<span class="muted">Hidden (blind mode). Answer first, then it appears.</span>`; return; }
+  if(!p.predicted_label){
+    box.innerHTML = `<span class="muted">The system has not learned enough yet. Label some parcels, then open the Learning tab.</span>`; return; }
+  const top = (p.predicted_top||[]).map(([l,v]) =>
+    `<div class="pbar"><div>${pretty(l)}</div><span><i style="width:${Math.round(v*100)}%"></i></span><em>${Math.round(v*100)}%</em></div>`).join("");
+  const disagree = p.n_votes && p.consensus_label !== p.predicted_label;
+  const L = pretty(p.predicted_label);
+  let action;
+  if(p.my_label) action = `<div class="muted" style="margin-top:10px">You answered: <b style="color:var(--text)">${pretty(p.my_label)}</b>${p.my_label === p.predicted_label ? " (the system was right)" : " (the system was wrong)"}. Click another label below to change it.</div>`;
+  else if(denyPid === p.parcel_id) action = `<div class="warn">Not ${L}. Pick what it really is below.</div>`;
+  else action = `<div class="yn"><button id="yesBtn" class="primary">✓ Yes</button><button id="noBtn" class="no">✗ No</button><button id="skipBtn" class="skip">Skip</button></div>
+      <div class="muted" style="font-size:11.5px;margin-top:6px">Keys: Y = yes · N = no · S = skip</div>`;
+  box.innerHTML = `<div class="muted" style="font-size:12px">The system thinks this is</div><div class="top"><b>${L}</b> <span class="muted">· ${Math.round(p.predicted_confidence*100)}% sure</span></div>${top}`
+    + (p.predicted_seen ? `<div class="muted" style="margin-top:8px;font-size:12px">People already labelled this parcel. This is what the system would have guessed without those answers.</div>` : "")
+    + (disagree ? `<div class="warn">The system disagrees with the current answer (${pretty(p.consensus_label)}).</div>` : "")
+    + action;
+  if($("yesBtn")){ $("yesBtn").onclick = yesGuess; $("noBtn").onclick = noGuess; $("skipBtn").onclick = skipParcel; }
+}
+function yesGuess(){ const p = currentParcel(); if(p && p.predicted_label) sendLabel(p.parcel_id, p.predicted_label); }
+function noGuess(){ const p = currentParcel(); if(!p || !p.predicted_label) return; denyPid = p.parcel_id; showDetail(); }
+function skipParcel(){ if(selected) skipped.add(selected); denyPid = null; askNext(); }
+function onKey(e){
+  if(mode !== "review" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if(["INPUT","SELECT","TEXTAREA"].includes(e.target.tagName)) return;
+  if(drawing){   // drawing mode: Enter = finish, Backspace = undo a point, Esc = cancel
+    if(e.key === "Enter"){ e.preventDefault(); finishDraw(); }
+    else if(e.key === "Backspace" || e.key === "Delete"){ e.preventDefault(); draft.pop(); renderDraft(); }
+    else if(e.key === "Escape") setDrawing(false);
+    return;
+  }
+  const p = currentParcel(), k = e.key.toLowerCase(), guessShown = p && p.predicted_label && !hiddenNow(p) && !p.my_label;
+  if(k === "y" && guessShown) yesGuess();
+  else if(k === "n" && guessShown) noGuess();
+  else if(k === "s") skipParcel();
+  else if(/^[1-9]$/.test(k) && p && cfg.labels[+k - 1]) sendLabel(p.parcel_id, cfg.labels[+k - 1]);
+}
+
+function showDetail(){
+  const f = gj && gj.features.find(x=>x.properties.parcel_id===selected);
+  $("empty").hidden = !!f || drawing; $("detail").hidden = !f || drawing;
+  if(!f) return;
+  const p = f.properties;
+  $("pid").textContent = p.parcel_id;
+  $("consBox").hidden = hiddenNow(p);
+  $("cons").textContent = p.n_votes ? `Current answer: ${pretty(p.consensus_label)} (${p.n_votes} vote${p.n_votes>1?"s":""}, ${Math.round(p.confidence*100)}% agree)` : "No answers yet. Be the first.";
+  $("conf").style.width = Math.round(p.confidence*100)+"%";
+  renderGuess(p);
+  const denied = denyPid === p.parcel_id ? p.predicted_label : null;
+  $("labelsH").textContent = denied ? "What is it then?" : "What is this parcel?";
+  $("labels").innerHTML = cfg.labels.map((l,i)=>`<button data-l="${l}" class="${p.my_label===l?"mine":""}" ${l===denied?"disabled":""}><span class="k">${i+1}</span>${pretty(l)}</button>`).join("");
+  $("labels").onclick = e => { const b=e.target.closest("button"); if(b) sendLabel(p.parcel_id, b.dataset.l); };
+  $("editRow").innerHTML = `<button id="redrawBtn" title="Replace this outline with a corrected one">✎ Redraw this boundary</button>`
+    + (p.edited ? `<button id="restoreBtn">Restore original outline</button>` : "");
+  $("redrawBtn").onclick = startRedraw;
+  if($("restoreBtn")) $("restoreBtn").onclick = restoreOutline;
+  $("editHint").textContent = [
+    p.edited ? "This outline was corrected by a person (shown with a dashed line)." : "",
+    p.boundary_issues.not_a_parcel ? `Reported as "not a parcel" ${p.boundary_issues.not_a_parcel} time(s): it is dimmed on the map.` : "",
+  ].filter(Boolean).join(" ");
+  $("issues").innerHTML = cfg.boundary_issues.map(i=>`<button data-i="${i}">${pretty(i)}${p.boundary_issues[i]?` (${p.boundary_issues[i]})`:""}</button>`).join("");
+  $("issues").onclick = e => { const b=e.target.closest("button"); if(b) sendIssue(p.parcel_id, b.dataset.i); };
+}
+
+async function sendLabel(pid, label){
+  if(!uid()) return toast("Enter your name or ID first");
+  if(busy) return;            // ignore double clicks / repeated key presses while saving
+  busy = true;
+  try{
+    localStorage.setItem("uid", uid());
+    const p = currentParcel();
+    const sawGuess = !!(p && p.predicted_label && !hiddenNow(p));   // did this person see the system's guess?
+    await post("/api/feedback/label", {image, parcel_id:pid, user_id:uid(), label, saw_guess:sawGuess});
+    denyPid = null;
+    toast(p && p.predicted_label && sawGuess ? (label === p.predicted_label ? "Saved: the system was right" : "Saved: thanks for correcting it") : "Saved. Thank you!");
+    await reload(); await askNext();
+  } finally { busy = false; }
+}
+async function sendIssue(pid, issue){
+  if(!uid()) return toast("Enter your name or ID first");
+  await post("/api/feedback/boundary", {image, parcel_id:pid, user_id:uid(), issue});
+  toast("Boundary report saved"); await reload();
+}
+async function reload(){ gj = await fetchParcels(image); render(); showDetail(); refreshStats(); }
+// The system retrains itself in the background. When a new version appears, refresh its guesses.
+async function checkModel(){
+  if(mode !== "review" || !image || !gj || drawing) return;
+  try{
+    const s = await api("/api/model");
+    if(s.trained && s.version !== gj.model_version){ await reload(); toast("The system learned from new answers"); }
+  }catch(e){}
+}
+async function askNext(){
+  const r = await api(`/api/images/${image}/next?user_id=${encodeURIComponent(uid())}&exclude=${encodeURIComponent([...skipped].join(","))}`);
+  if(!r.parcel_id) return toast("No more parcels to ask about. Clear skips by reloading the page.");
+  select(r.parcel_id, true);   // always bring the next parcel into view
+}
+async function refreshStats(){
+  const s = await api("/api/stats");
+  $("stats").textContent = `${s.label_votes} labels · ${s.boundary_reports} boundary reports · ${s.missed_parcels} missed parcels · ${s.users} users`;
+}
+
+// ---- draw a missed parcel
+// drawKind: "missed" = add a parcel the detector missed; "redraw" = replace the outline of the selected parcel
+let drawKind = "missed", redrawPid = null;
+function setDrawing(on, kind){
+  drawing = on; draft = []; drawLabel = null;
+  drawKind = on ? (kind || "missed") : "missed";
+  redrawPid = on && drawKind === "redraw" ? selected : null;
+  $("drawBtn").classList.toggle("active", on && drawKind === "missed");
+  $("drawHelp").hidden = !on;
+  $("drawLabelBox").hidden = drawKind === "redraw";
+  $("drawTitle").textContent = drawKind === "redraw" ? "Redraw the boundary" : "Drawing mode";
+  $("drawText").textContent = drawKind === "redraw"
+    ? "Click points around the TRUE edge of this parcel, one after another along its outline. The yellow dashed line is the outline being replaced. Then press Finish:"
+    : "Click points around the missed parcel. Then:";
+  if(on){ $("empty").hidden = true; $("detail").hidden = true; } else { showDetail(); if(!selected) $("empty").hidden=false; }
+  [...$("drawLabels").children].forEach(c=>c.classList.remove("mine"));
+  if(gj) render();   // redraws the outlines (and shows the outline being replaced while redrawing)
+}
+function startRedraw(){
+  const p = currentParcel(); if(!p) return;
+  if(!uid()) return toast("Enter your name or ID first");
+  focusParcel(p.parcel_id);   // bring the parcel into view at the current zoom
+  setDrawing(true, "redraw");
+}
+async function restoreOutline(){
+  const p = currentParcel(); if(!p || !uid()) return toast("Enter your name or ID first");
+  await post("/api/feedback/redraw", {image, parcel_id:p.parcel_id, user_id:uid(), polygon:null});
+  toast("Original outline restored"); await reload();
+}
+$("svg").addEventListener("click", ev => {
+  if(!drawing) return;
+  const pt = $("svg").createSVGPoint(); pt.x=ev.clientX; pt.y=ev.clientY;
+  const p = pt.matrixTransform($("svg").getScreenCTM().inverse());
+  draft.push([Math.round(p.x), Math.round(p.y)]); renderDraft();
+});
+function renderDraft(){
+  document.querySelectorAll(".draft").forEach(e=>e.remove());
+  if(!drawing || !draft.length) return;
+  const el = document.createElementNS(NS, draft.length>2 ? "polygon":"polyline");
+  el.setAttribute("points", draft.map(p=>p.join(",")).join(" "));
+  el.setAttribute("class","draft"); el.style.pointerEvents="none";
+  $("svg").appendChild(el);
+}
+async function finishDraw(){
+  if(!uid()) return toast("Enter your name or ID first");
+  if(draft.length<3) return toast("Click at least 3 points");
+  if(drawKind === "redraw"){
+    const pid = redrawPid;
+    try{ await post("/api/feedback/redraw", {image, parcel_id:pid, user_id:uid(), polygon:draft}); }
+    catch(e){ return toast(e.message); }          // e.g. "The outline crosses itself..." - stay in drawing mode
+    setDrawing(false); await reload(); select(pid, false); toast("Boundary updated. Thank you!");
+    return;
+  }
+  await post("/api/feedback/missed", {image, user_id:uid(), polygon:draft, label:drawLabel});
+  toast("Missed parcel saved"); setDrawing(false); reload();
+}
+// ================================================================ add a new area
+let mode = "review", map = null, rect = null, selecting = false, startLL = null, lastLL = null;
+let plan = null, planSeq = 0, detOK = false, jobBusy = false;
+const PLAN_HINT = "Zoom the map to your land, then draw a box around it. Smaller boxes give sharper parcels.";
+
+function setMode(m){
+  mode = m;
+  $("reviewMain").hidden = m !== "review"; $("addMain").hidden = m !== "add"; $("learnMain").hidden = m !== "learn";
+  $("reviewControls").hidden = m !== "review";
+  $("tabReview").classList.toggle("active", m==="review"); $("tabAdd").classList.toggle("active", m==="add");
+  $("tabLearn").classList.toggle("active", m==="learn");
+  if(m === "add"){ ensureMap(); refreshDetector(); }
+  if(m === "learn") loadLearn();
+}
+
+// ================================================================ the Learning page
+const pct = v => v == null ? "–" : Math.round(v*100) + "%";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let learnTimer = null;
+async function loadLearn(){
+  clearTimeout(learnTimer);
+  let s;
+  try{ s = await api("/api/model"); }catch(e){ $("learnBody").innerHTML = `<p class="err">${esc(e.message)}</p>`; return; }
+  if(mode !== "learn") return;
+  renderLearn(s);
+  if(s.training) learnTimer = setTimeout(loadLearn, 1500);
+}
+async function retrainNow(){
+  try{ await post("/api/model/retrain", {}); }catch(e){ toast(e.message); }
+  loadLearn();
+}
+function renderLearn(s){
+  const m = s.metrics || {};
+  let html = `<h2>How the system learns</h2>
+    <p>Every time someone labels a parcel, that answer becomes a training example. The system measures each parcel (its colour, texture,
+    shape and the land around it) and learns which measurements go with which label. It then guesses the label of every other parcel and says
+    how sure it is. It trains itself again after every ${s.auto_every} new answers.</p>`;
+
+  // ---- status
+  html += `<div class="card statusline">`;
+  if(s.training) html += `<span><span class="spin"></span>${esc(s.message || "Training...")}</span>`;
+  else if(s.trained) html += `<span>Trained on <b>${s.n_train}</b> labelled parcels · version ${s.version} · ${new Date(s.trained_at*1000).toLocaleString()}</span>`
+    + (s.labels_waiting ? `<span class="muted">${s.labels_waiting} new answer${s.labels_waiting>1?"s":""} waiting (it retrains after ${s.auto_every})</span>` : "");
+  else html += `<span>Not trained yet. It needs ${s.min_train} labelled parcels with at least two different labels. You have <b>${s.n_labelled_now}</b>.</span>`;
+  if(s.error) html += `<span class="err">${esc(s.error)}</span>`;
+  else if(!s.training && s.message && !s.trained) html += `<span class="muted">${esc(s.message)}</span>`;
+  html += `<button id="retrainBtn" class="primary" style="margin-left:auto" ${s.training ? "disabled" : ""}>Retrain now</button></div>`;
+
+  if(s.trained){
+    // ---- accuracy tiles
+    const o = s.online || {};
+    html += `<h2>How good is it?</h2>
+      <p>These numbers are measured only on parcels the system did <b>not</b> study while learning, so they are not flattered by memory.</p>
+      <div class="tiles">
+        <div class="tile"><div class="k">Right on parcels it has not studied</div>
+          <div class="v">${pct(m.cv_accuracy)}</div>
+          <div class="c">${m.cv_accuracy == null ? "Needs at least 2 labels with 3 examples each." : `Always guessing the most common label would get ${pct(m.cv_baseline)}. Tested on ${m.n_evaluated} parcels.`}</div></div>
+        <div class="tile"><div class="k">Right on a brand-new area</div>
+          <div class="v">${pct(m.new_area_accuracy)}</div>
+          <div class="c">${m.new_area_accuracy == null ? "Needs 2 areas with at least 8 labelled parcels each." : `Trained on the other areas, tested on this one (${m.new_area_images} areas). Blind guessing: ${pct(m.new_area_baseline)}.`}</div></div>
+        <div class="tile"><div class="k">Matches people in real use</div>
+          <div class="v">${pct(o.agree)}</div>
+          <div class="c">${o.n ? `Across the ${o.n} answers given since the system started guessing, its guess (recorded before the person answered) matched ${pct(o.agree)}.` : "Appears after people answer while a model exists."}</div></div>
+      </div>`;
+
+    // ---- learning curve
+    html += `<h2>Does it get better with more labels?</h2>
+      <p>Each point: the system studies only that many labelled parcels, then is tested on parcels it never saw. Repeated several times; the band shows how much the result varies.</p>`
+      + (m.curve && m.curve.length ? chartHtml(m) : `<p class="muted">The curve appears once there are about 20 labelled parcels.</p>`);
+
+    // ---- per label
+    const pc = m.per_class || {};
+    const names = Object.keys(m.class_counts || {}).sort((a,b)=>m.class_counts[b]-m.class_counts[a]);
+    html += `<h2>Which labels does it handle well?</h2>
+      <p><b>Finds</b>: of the parcels people called this, how many the system recognised. <b>Right when it says</b>: of the parcels the system called this, how many really were.</p>
+      <table class="t"><tr><th>Label</th><th class="n">Examples</th><th>Finds</th><th>Right when it says</th></tr>`
+      + names.map(l => { const r = pc[l];
+          return `<tr><td>${pretty(l)}</td><td class="n">${m.class_counts[l]}</td>`
+            + (r ? `<td><span class="hb" style="width:${Math.round((r.recall||0)*90)}px"></span>${pct(r.recall)}</td><td><span class="hb" style="width:${Math.round((r.precision||0)*90)}px"></span>${pct(r.precision)}</td>`
+                 : `<td colspan="2" class="muted">too few examples to test (needs 3)</td>`) + `</tr>`; }).join("")
+      + `</table>`;
+
+    // ---- what it looks at
+    html += `<h2>What does it look at?</h2><p>Share of the decision that comes from each kind of measurement.</p><table class="t">`
+      + (m.top_features||[]).map(([g,v]) => `<tr><td style="width:260px">${esc(g)}</td><td><span class="hb" style="width:${Math.round(v*300)}px"></span>${pct(v)}</td></tr>`).join("")
+      + `</table>`;
+  }
+
+  // ---- history
+  if(s.history && s.history.length){
+    html += `<h2>Every time it retrained</h2><p>This is the real history: as people gave more answers, each retraining measured its accuracy again.</p>
+      <table class="t"><tr><th>Version</th><th>When</th><th class="n">Labelled parcels</th><th class="n">Accuracy</th><th class="n">New area</th><th>Started by</th></tr>`
+      + [...s.history].reverse().map(h => `<tr><td>${h.id}</td><td>${new Date(h.ts*1000).toLocaleString()}</td><td class="n">${h.n_train}</td>
+          <td class="n">${pct(h.cv_accuracy)}</td><td class="n">${pct(h.new_area_accuracy)}</td><td>${h.trigger === "auto" ? "automatically" : "you"}</td></tr>`).join("")
+      + `</table>`;
+  }
+  $("learnBody").innerHTML = html;
+  const rb = $("retrainBtn"); if(rb) rb.onclick = retrainNow;
+  if(s.trained && m.curve && m.curve.length) wireChart(m);
+}
+
+// ---- learning-curve chart (inline SVG): the system's accuracy with a spread band, against a "blind guess" line
+function chartHtml(m){
+  const W = 720, H = 320, L = 46, R = 150, T = 16, B = 44, iw = W-L-R, ih = H-T-B;
+  const pts = m.curve, xmax = pts[pts.length-1].n, xmin = pts[0].n;
+  const X = n => L + (xmax === xmin ? iw/2 : (n - xmin) / (xmax - xmin) * iw), Y = v => T + (1 - v) * ih;
+  const grid = [0, .25, .5, .75, 1].map(v => `<line x1="${L}" x2="${L+iw}" y1="${Y(v)}" y2="${Y(v)}" stroke="#2c3541" stroke-width="1"/>
+      <text x="${L-8}" y="${Y(v)+4}" text-anchor="end" fill="#93a0af" font-size="11">${Math.round(v*100)}%</text>`).join("");
+  const xt = pts.map(p => `<text x="${X(p.n)}" y="${T+ih+18}" text-anchor="middle" fill="#93a0af" font-size="11">${p.n}</text>`).join("");
+  const hi = pts.map(p => `${X(p.n)},${Y(Math.min(1, p.acc+p.std))}`), lo = pts.map(p => `${X(p.n)},${Y(Math.max(0, p.acc-p.std))}`).reverse();
+  const line = pts.map(p => `${X(p.n)},${Y(p.acc)}`).join(" ");
+  const last = pts[pts.length-1], by = Y(m.curve_baseline);
+  const dots = pts.map((p,i) => `<circle cx="${X(p.n)}" cy="${Y(p.acc)}" r="4" fill="var(--s1)" stroke="#1d232b" stroke-width="2"/>
+      <circle class="hit" data-i="${i}" cx="${X(p.n)}" cy="${Y(p.acc)}" r="16" fill="transparent" style="cursor:pointer"/>`).join("");
+  return `<div class="legendrow"><span><i></i>System's accuracy</span><span><i class="b"></i>Guessing the most common label</span></div>
+    <div class="card" id="chartBox"><div id="tip"></div>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Accuracy rises from ${pct(pts[0].acc)} with ${pts[0].n} labelled parcels to ${pct(last.acc)} with ${last.n}">
+      ${grid}${xt}
+      <text x="${L+iw/2}" y="${H-6}" text-anchor="middle" fill="#93a0af" font-size="12">Labelled parcels the system learned from</text>
+      <polygon points="${hi.join(" ")} ${lo.join(" ")}" fill="var(--s1)" fill-opacity=".14"/>
+      <line x1="${L}" x2="${L+iw}" y1="${by}" y2="${by}" stroke="var(--s2)" stroke-width="2"/>
+      <polyline points="${line}" fill="none" stroke="var(--s1)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${dots}
+      <text x="${X(last.n)+12}" y="${Y(last.acc)+4}" fill="#e6ebf1" font-size="12" font-weight="600">${pct(last.acc)}</text>
+      <text x="${L+iw+8}" y="${by+4}" fill="#93a0af" font-size="12">blind guess ${pct(m.curve_baseline)}</text>
+    </svg></div>
+    <details><summary>Show as a table</summary><table class="t"><tr><th class="n">Labelled parcels</th><th class="n">Accuracy</th><th class="n">± spread</th></tr>
+      ${pts.map(p => `<tr><td class="n">${p.n}</td><td class="n">${pct(p.acc)}</td><td class="n">${Math.round(p.std*100)}%</td></tr>`).join("")}</table></details>`;
+}
+function wireChart(m){
+  const box = $("chartBox"), tip = $("tip"); if(!box) return;
+  box.querySelectorAll(".hit").forEach(el => {
+    el.addEventListener("mouseenter", () => {
+      const p = m.curve[+el.dataset.i], r = el.getBoundingClientRect(), b = box.getBoundingClientRect();
+      tip.innerHTML = `<b>${pct(p.acc)}</b> right with ${p.n} labelled parcels<br><span class="muted">varies by ±${Math.round(p.std*100)}%</span>`;
+      tip.style.left = Math.min(b.width - 210, Math.max(0, r.left - b.left - 60)) + "px"; tip.style.top = (r.top - b.top - 52) + "px"; tip.style.opacity = 1;
+    });
+    el.addEventListener("mouseleave", () => { tip.style.opacity = 0; });
+  });
+}
+async function refreshImages(select){
+  const imgs = await api("/api/images");
+  $("imageSel").innerHTML = imgs.map(n=>`<option>${n}</option>`).join("");
+  if(select && imgs.includes(select)){ $("imageSel").value = select; await loadImage(select); }
+  return imgs;
+}
+function ensureMap(){
+  if(map){ setTimeout(()=>map.invalidateSize(), 50); return; }
+  map = L.map("map").setView([23.7, 90.4], 7);
+  L.tileLayer(cfg.tile_url, {maxZoom: 19, attribution: cfg.tile_attribution}).addTo(map);
+  map.on("mousedown", e => { if(!selecting) return; e.originalEvent.preventDefault(); startLL = lastLL = e.latlng; setRect(L.latLngBounds(startLL, startLL)); });
+  map.on("mousemove", e => { if(!selecting || !startLL) return; lastLL = e.latlng; setRect(L.latLngBounds(startLL, lastLL)); });
+  window.addEventListener("mouseup", () => { if(selecting && startLL) finishRect(); });
+  $("attrib").innerHTML = cfg.tile_attribution;
+}
+function setRect(b){
+  if(!rect) rect = L.rectangle(b, {color:"#f0b429", weight:2, fillOpacity:0.12}).addTo(map); else rect.setBounds(b);
+}
+function startRect(){
+  if(selecting) return endSelecting();
+  selecting = true; map.dragging.disable(); map.getContainer().style.cursor = "crosshair";
+  $("rectBtn").classList.add("active"); $("rectBtn").textContent = "Click and drag on the map...";
+}
+function endSelecting(){
+  selecting = false; startLL = null; map.dragging.enable(); map.getContainer().style.cursor = "";
+  $("rectBtn").classList.remove("active"); $("rectBtn").textContent = "Draw a box";
+}
+function finishRect(){
+  const tiny = lastLL && startLL && map.latLngToContainerPoint(startLL).distanceTo(map.latLngToContainerPoint(lastLL)) < 8;
+  endSelecting();
+  if(tiny && rect){ map.removeLayer(rect); rect = null; }
+  updatePlan();
+}
+async function updatePlan(){
+  const seq = ++planSeq; plan = null; updateDetectBtn();
+  if(!rect){ $("planBox").textContent = PLAN_HINT; return; }
+  const b = rect.getBounds();
+  const q = new URLSearchParams({west:b.getWest(), south:b.getSouth(), east:b.getEast(), north:b.getNorth()});
+  const res = await fetch("/api/plan?" + q); const j = await res.json();
+  if(seq !== planSeq) return;
+  if(!res.ok){ $("planBox").innerHTML = `<span style="color:#ff8a8a">${j.detail}</span>`; return; }
+  plan = {bbox:[b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], ...j};
+  $("planBox").innerHTML = `Selected area: about <b>${j.width_m} &times; ${j.height_m} m</b><br>`
+    + `Image: ${j.width} &times; ${j.height} px (${j.m_per_px} m per pixel, zoom ${j.zoom}), ${j.tiles} tiles`
+    + (j.m_per_px > 0.9 ? "<br>Tip: a smaller box gives sharper parcels." : "");
+  updateDetectBtn();
+}
+function updateDetectBtn(){ $("detectBtn").disabled = !(plan && detOK) || jobBusy; }
+
+async function refreshDetector(){
+  $("detMsg").textContent = "Checking..."; $("detDot").className = "dot";
+  try{
+    const s = await api("/api/detector/status");
+    detOK = !!s.connected; $("detDot").className = "dot " + (s.connected ? "ok" : (s.configured ? "bad" : ""));
+    $("detMsg").textContent = s.message;
+  }catch(e){ detOK = false; $("detDot").className = "dot bad"; $("detMsg").textContent = e.message; }
+  updateDetectBtn();
+}
+async function saveLink(){
+  const link = $("linkIn").value.trim();
+  if(!link) return toast("Paste the connection link first");
+  $("detMsg").textContent = "Connecting...";
+  try{
+    const s = await post("/api/detector/link", {link});
+    detOK = !!s.connected; $("detDot").className = "dot " + (s.connected ? "ok" : "bad"); $("detMsg").textContent = s.message;
+    if(s.connected) $("linkIn").value = "";
+  }catch(e){ $("detMsg").textContent = e.message; }
+  updateDetectBtn();
+}
+function showJob(msg, isErr, running){
+  const b = $("jobBox"); b.hidden = false; b.className = isErr ? "err" : "";
+  b.innerHTML = (running ? '<span class="spin"></span>' : "") + msg;
+}
+async function detect(){
+  if(!plan || !detOK || jobBusy) return;
+  jobBusy = true; updateDetectBtn(); showJob("Starting...", false, true);
+  try{
+    const r = await post("/api/sites", {bbox: plan.bbox, name: $("areaName").value, quality: $("quality").value});
+    localStorage.setItem("pendingJob", JSON.stringify(r));
+    await pollJob(r.job_id);
+  }catch(e){ showJob(e.message, true); jobBusy = false; updateDetectBtn(); }
+}
+async function pollJob(id){
+  jobBusy = true; updateDetectBtn();
+  while(true){
+    let j;
+    try{ j = await api("/api/jobs/" + id); }
+    catch(e){ localStorage.removeItem("pendingJob"); showJob("Lost track of this job (" + e.message + "). Try again.", true); break; }
+    if(j.status === "running"){ showJob(`${j.message} (${j.elapsed}s)`, false, true); await new Promise(r => setTimeout(r, 2000)); continue; }
+    localStorage.removeItem("pendingJob");
+    if(j.status === "done"){
+      const warn = (j.warnings||[]).map(w => "<br><b>Warning:</b> " + w).join("");
+      showJob(j.message + warn, false);
+      toast("Parcels ready. Opening them for review...");
+      await refreshImages(j.site); setMode("review");
+    } else showJob(j.error || "Something went wrong.", true);
+    break;
+  }
+  jobBusy = false; updateDetectBtn();
+}
+async function goPlace(){
+  const q = $("placeIn").value.trim(); if(!q) return;
+  const m = q.match(/^\s*(-?\d+(?:\.\d+)?)\s*[, ]\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if(m){ map.setView([+m[1], +m[2]], 16); return; }
+  try{
+    const r = await fetch("https://nominatim.openstreetmap.org/search?format=json&limit=1&q=" + encodeURIComponent(q));
+    const j = await r.json();
+    if(!j.length) return toast("Place not found");
+    const b = j[0].boundingbox; map.fitBounds([[+b[0], +b[2]], [+b[1], +b[3]]], {maxZoom: 16});
+  }catch(e){ toast("Search needs internet. You can also type: lat, lon"); }
+}
+function initAdd(){
+  $("tabReview").onclick = () => setMode("review"); $("tabAdd").onclick = () => setMode("add"); $("tabLearn").onclick = () => setMode("learn");
+  $("linkSave").onclick = saveLink; $("linkIn").addEventListener("keydown", e => { if(e.key === "Enter") saveLink(); });
+  $("rectBtn").onclick = startRect;
+  $("viewBtn").onclick = () => { setRect(map.getBounds().pad(-0.15)); updatePlan(); };
+  $("placeGo").onclick = goPlace; $("placeIn").addEventListener("keydown", e => { if(e.key === "Enter") goPlace(); });
+  $("detectBtn").onclick = detect;
+  try{
+    const pj = JSON.parse(localStorage.getItem("pendingJob") || "null");
+    if(pj){ setMode("add"); showJob("Resuming your last detection...", false, true); pollJob(pj.job_id); }
+  }catch(e){}
+}
+
+init();
+</script>
+</body>
+</html>

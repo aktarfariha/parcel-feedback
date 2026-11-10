@@ -1,0 +1,25 @@
+# --- your own data: never publish these ---
+data/*
+!data/.keep
+feedback.db
+*.db
+model/
+# (settings.json holds the detector link + token)
+settings.json
+.env
+
+# --- big files / downloads ---
+*.pth
+*.pt
+*.ckpt
+*.joblib
+
+# --- python / editor noise ---
+__pycache__/
+*.pyc
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
